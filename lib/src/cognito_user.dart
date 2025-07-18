@@ -540,6 +540,45 @@ class CognitoUser {
     return _signInUserSession;
   }
 
+  Future<CognitoUserSession> respondToAuthChallengeSignInOtp(String code) async {
+    final paramsReq = {
+      'ClientId': pool.getClientId(),
+      'ChallengeName': 'CUSTOM_CHALLENGE',
+      'Session': _session,
+      'ChallengeResponses': {'USERNAME': username, 'ANSWER': code},
+    };
+
+    try {
+      final data = await client!.request(
+        'RespondToAuthChallenge',
+        await _analyticsMetadataParamsDecorator.call(paramsReq),
+      );
+      final authResult = data['AuthenticationResult'];
+      if (authResult == null) {
+        throw CognitoUserCustomChallengeException(challengeParameters: data['ChallengeParameters']);
+      }
+      final idToken = CognitoIdToken(authResult['IdToken']);
+      final accessToken = CognitoAccessToken(authResult['AccessToken']);
+      final refreshToken = CognitoRefreshToken(authResult['RefreshToken']);
+
+      final session = CognitoUserSession(idToken, accessToken, refreshToken: refreshToken);
+      _signInUserSession = session;
+      await cacheTokens();
+
+      return session;
+    } on CognitoClientException catch (e) {
+      if (e.code == 'ResourceNotFoundException' && e.message!.toLowerCase().contains('device')) {
+        _deviceKey = null;
+        _randomPassword = null;
+        _deviceGroupKey = null;
+        await clearCachedDeviceKeyAndPassword();
+      }
+      rethrow;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   /// This is used for authenticating the user.
   Future<CognitoUserSession?> authenticateUser(
       AuthenticationDetails authDetails) async {
